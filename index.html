@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1115" />
+    <title>Clipped — HD clips that look good in a deck</title>
+    <meta name="description" content="Turn any video into short, shareable HD clips and GIFs. No watermarks." />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="logo">
+          <div class="logo-mark">✂️</div>
+          Clipped
+          <span class="tagline">HD clips that actually look good in a deck</span>
+        </div>
+        <button class="btn-ghost hidden" id="btnNew">New video</button>
+      </header>
+
+      <!-- upload screen -->
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-icon">🎬</div>
+        <h2>Drop a video here</h2>
+        <p>Trim it into a short, shareable clip — right in your browser. Your video never leaves your device.</p>
+        <button class="btn-primary" id="btnChoose">Choose a video</button>
+        <span class="formats">MP4 · MOV · WEBM · M4V</span>
+        <input type="file" id="fileInput" accept="video/*,.mp4,.mov,.webm,.m4v" hidden />
+      </div>
+
+      <!-- editor screen -->
+      <div class="editor hidden" id="editor">
+        <div class="video-wrap">
+          <video id="video" playsinline></video>
+        </div>
+
+        <div class="file-meta">
+          <span class="name" id="metaName"></span>
+          <span id="metaSize"></span>
+          <span id="metaDims"></span>
+          <span id="metaDur"></span>
+        </div>
+
+        <div class="timeline-card">
+          <div class="timeline-label">
+            <span>Drag the handles to choose your clip</span>
+            <span><b id="lblCurrent">0:00.0</b> / <span id="lblTotal">0:00.0</span></span>
+          </div>
+
+          <div class="timeline" id="timeline">
+            <div class="tl-strip" id="strip"></div>
+            <div class="tl-shade" id="shadeL"></div>
+            <div class="tl-shade" id="shadeR"></div>
+            <div class="tl-range" id="range"></div>
+            <div class="tl-playhead" id="playhead"></div>
+            <div class="tl-handle in" id="handleIn"><span class="grip" id="gripIn">0:00.0</span></div>
+            <div class="tl-handle out" id="handleOut"><span class="grip" id="gripOut">0:00.0</span></div>
+          </div>
+
+          <div class="controls">
+            <button class="btn-icon" id="btnPlay" aria-label="Play or pause">▶</button>
+            <button class="btn-chip in" id="btnSetIn">⇤ Start here</button>
+            <button class="btn-chip out" id="btnSetOut">End here ⇥</button>
+            <label class="loop-toggle">
+              <input type="checkbox" id="chkLoop" checked />
+              Loop clip
+            </label>
+          </div>
+        </div>
+
+        <div class="clip-summary">
+          <div class="info">
+            Your clip: <b id="sumIn">0:00.0</b> → <b id="sumOut">0:00.0</b> &nbsp;·&nbsp; <b id="sumLen">0:00.0</b> long
+          </div>
+          <div class="summary-actions">
+            <span class="coming-soon">Export to MP4 / WebP / GIF — coming next</span>
+            <button class="btn-primary" disabled>Export clip</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="footer">
+        Clipped · your video is processed on your device — nothing is uploaded · no watermarks
+      </footer>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
