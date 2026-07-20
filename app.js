@@ -34,6 +34,7 @@
   var duration = 0;
   var inPoint = 0;
   var outPoint = 0;
+  var clips = []; // saved ranges: [{in, out}] — empty means "just export the current selection"
   var dragging = null; // 'in' | 'out' | 'scrub' | null
   var stripToken = 0;  // cancels stale filmstrip jobs
 
@@ -98,6 +99,8 @@
     duration = video.duration;
     inPoint = 0;
     outPoint = duration;
+    clips = [];
+    renderClips();
     $('metaDims').textContent = video.videoWidth + '×' + video.videoHeight;
     $('metaDur').textContent = fmt(duration) + ' total';
     $('lblTotal').textContent = fmt(duration);
@@ -270,6 +273,59 @@
     render();
   });
 
+  // ---- multiple clips ----
+  var clipsRow = $('clipsRow');
+  var btnAddClip = $('btnAddClip');
+
+  function renderClips() {
+    clipsRow.innerHTML = '';
+    clipsRow.classList.toggle('hidden', clips.length === 0);
+
+    // small colored markers under the timeline showing saved ranges
+    var old = timeline.querySelectorAll('.tl-saved');
+    for (var k = 0; k < old.length; k++) old[k].remove();
+
+    clips.forEach(function (c, i) {
+      var chip = document.createElement('span');
+      chip.className = 'clip-chip';
+      chip.innerHTML = '<b>Clip ' + (i + 1) + '</b> ' + fmt(c.in) + '–' + fmt(c.out) +
+        ' <button class="chip-x" aria-label="Remove clip ' + (i + 1) + '">×</button>';
+      chip.addEventListener('click', function (e) {
+        if (e.target.className === 'chip-x') {
+          clips.splice(i, 1);
+          renderClips();
+          return;
+        }
+        inPoint = c.in;
+        outPoint = c.out;
+        video.currentTime = c.in;
+        render();
+      });
+      clipsRow.appendChild(chip);
+
+      var mark = document.createElement('div');
+      mark.className = 'tl-saved';
+      mark.style.left = pct(c.in) + '%';
+      mark.style.width = pct(c.out - c.in) + '%';
+      timeline.appendChild(mark);
+    });
+
+    if (btnExport) {
+      btnExport.textContent = clips.length > 1 ? 'Export ' + clips.length + ' clips' : 'Export clip';
+    }
+  }
+
+  btnAddClip.addEventListener('click', function () {
+    if (!duration) return;
+    clips.push({ in: inPoint, out: outPoint });
+    // fresh selection so the next clip starts from a clean slate
+    inPoint = 0;
+    outPoint = duration;
+    renderClips();
+    render();
+    showNotice('Clip ' + clips.length + ' saved — now pick your next section, or press Export.');
+  });
+
   document.addEventListener('keydown', function (e) {
     if (editor.classList.contains('hidden')) return;
     if (e.target.tagName === 'INPUT') return;
@@ -318,6 +374,8 @@
     file = null;
     closeExport();
     duration = 0;
+    clips = [];
+    renderClips();
     stripToken++;
     strip.innerHTML = '';
     fileInput.value = '';
@@ -340,8 +398,6 @@
   var ffmpeg = null;        // FFmpeg instance, kept warm between exports
   var exporting = false;
   var cancelled = false;
-  var resultUrl = null;
-  var resultFmt = null; // format of the finished export, so re-downloads name it right
 
   // progress reported by parsing ffmpeg's own log lines, scaled to the
   // window [from..to] so multi-pass exports (GIF) show one smooth bar
@@ -377,40 +433,41 @@
     });
   }
 
-  function trimArgs(inputName) {
-    return ['-ss', inPoint.toFixed(3), '-to', outPoint.toFixed(3), '-i', inputName];
+  function trimArgs(seg, inputName) {
+    return ['-ss', seg.in.toFixed(3), '-to', seg.out.toFixed(3), '-i', inputName];
   }
 
-  function runExport(fmt, inputName) {
+  function runExport(fmt, seg, inputName, label) {
     var outName = 'out.' + fmt;
+    var len = seg.out - seg.in;
     if (fmt === 'mp4') {
-      exportStatus.textContent = 'Exporting HD MP4…';
-      progWindow = { from: 0, to: 1, clipLen: outPoint - inPoint };
-      return ffmpeg.exec(trimArgs(inputName).concat([
+      exportStatus.textContent = label + 'Exporting HD MP4…';
+      progWindow = { from: 0, to: 1, clipLen: len };
+      return ffmpeg.exec(trimArgs(seg, inputName).concat([
         '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', '-y', outName
       ])).then(function () { return outName; });
     }
     if (fmt === 'webp') {
-      exportStatus.textContent = 'Exporting animated WebP…';
-      progWindow = { from: 0, to: 1, clipLen: outPoint - inPoint };
-      return ffmpeg.exec(trimArgs(inputName).concat([
+      exportStatus.textContent = label + 'Exporting animated WebP…';
+      progWindow = { from: 0, to: 1, clipLen: len };
+      return ffmpeg.exec(trimArgs(seg, inputName).concat([
         '-vcodec', 'libwebp', '-filter:v', 'fps=20',
         '-lossless', '0', '-q:v', '75', '-loop', '0', '-an', '-y', outName
       ])).then(function () { return outName; });
     }
     // gif: two passes — build a color palette first, then use it (much better quality)
     var vf = 'fps=15,scale=min(1080\\,iw):-1:flags=lanczos';
-    exportStatus.textContent = 'Preparing GIF colors…';
-    progWindow = { from: 0, to: 0.35, clipLen: outPoint - inPoint };
-    return ffmpeg.exec(trimArgs(inputName).concat([
+    exportStatus.textContent = label + 'Preparing GIF colors…';
+    progWindow = { from: 0, to: 0.35, clipLen: len };
+    return ffmpeg.exec(trimArgs(seg, inputName).concat([
       '-vf', vf + ',palettegen=stats_mode=diff', '-y', 'palette.png'
     ])).then(function () {
       if (cancelled) throw new Error('cancelled');
-      exportStatus.textContent = 'Exporting GIF…';
-      progWindow = { from: 0.35, to: 1, clipLen: outPoint - inPoint };
-      return ffmpeg.exec(trimArgs(inputName).concat([
+      exportStatus.textContent = label + 'Exporting GIF…';
+      progWindow = { from: 0.35, to: 1, clipLen: len };
+      return ffmpeg.exec(trimArgs(seg, inputName).concat([
         '-i', 'palette.png',
         '-lavfi', vf + ',paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
         '-y', outName
@@ -434,6 +491,10 @@
     if (ACCEPTED.indexOf(ext) === -1) ext = 'mp4';
     var inputName = 'input.' + ext;
 
+    // saved clips export one after another; otherwise just the current selection
+    var segs = clips.length ? clips.slice() : [{ in: inPoint, out: outPoint }];
+    var results = [];
+
     getFFmpeg().then(function () {
       if (cancelled) throw new Error('cancelled');
       exportStatus.textContent = 'Reading your video…';
@@ -442,72 +503,101 @@
       if (cancelled) throw new Error('cancelled');
       return ffmpeg.writeFile(inputName, new Uint8Array(buf));
     }).then(function () {
-      if (cancelled) throw new Error('cancelled');
-      return runExport(fmt, inputName);
-    }).then(function (outName) {
-      if (cancelled) throw new Error('cancelled');
-      return ffmpeg.readFile(outName);
-    }).then(function (data) {
-      if (cancelled) throw new Error('cancelled');
+      var chain = Promise.resolve();
+      segs.forEach(function (seg, i) {
+        chain = chain.then(function () {
+          if (cancelled) throw new Error('cancelled');
+          var label = segs.length > 1 ? 'Clip ' + (i + 1) + ' of ' + segs.length + ' — ' : '';
+          return runExport(fmt, seg, inputName, label).then(function (outName) {
+            return ffmpeg.readFile(outName);
+          }).then(function (data) {
+            if (cancelled) throw new Error('cancelled');
+            var mime = fmt === 'mp4' ? 'video/mp4' : fmt === 'webp' ? 'image/webp' : 'image/gif';
+            var blob = new Blob([data.buffer], { type: mime });
+            results.push({
+              url: URL.createObjectURL(blob),
+              size: blob.size,
+              name: downloadName(fmt, segs.length > 1 ? i + 1 : 0)
+            });
+            downloadResult(results[results.length - 1]);
+          });
+        });
+      });
+      return chain;
+    }).then(function () {
       setProgress(1);
-      var mime = fmt === 'mp4' ? 'video/mp4' : fmt === 'webp' ? 'image/webp' : 'image/gif';
-      finishExport(new Blob([data.buffer], { type: mime }), fmt);
+      finishExport(results, fmt);
     }).catch(function (err) {
       exporting = false;
       btnExport.disabled = false;
+      freeResults(results);
       if (cancelled) { exportCard.classList.add('hidden'); return; }
       exportCard.classList.add('hidden');
-      showNotice('Export didn’t work for this video. Try MP4 format, or a shorter clip.');
+      var detail = err && err.message ? ' (' + err.message + ')' : '';
+      showNotice('Export didn’t work for this video' + detail + '. Try the MP4 format, or a shorter clip.');
       if (window.console) console.error('export failed:', err);
     });
   }
 
-  function downloadName(fmt) {
+  function downloadName(fmt, num) {
     var base = (file && file.name ? file.name : 'clip').replace(/\.[^.]+$/, '');
-    return base + '-clip.' + fmt;
+    return base + '-clip' + (num ? '-' + num : '') + '.' + fmt;
   }
 
-  function finishExport(blob, fmt) {
-    exporting = false;
-    btnExport.disabled = false;
-    if (resultUrl) URL.revokeObjectURL(resultUrl);
-    resultUrl = URL.createObjectURL(blob);
-    resultFmt = fmt;
-
-    var preview = $('resultPreview');
-    preview.innerHTML = '';
-    if (fmt === 'mp4') {
-      var v = document.createElement('video');
-      v.src = resultUrl;
-      v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
-      preview.appendChild(v);
-    } else {
-      var img = document.createElement('img');
-      img.src = resultUrl;
-      img.alt = 'Exported clip';
-      preview.appendChild(img);
-    }
-
-    $('resultName').textContent = downloadName(fmt);
-    $('resultSize').textContent = fmtSize(blob.size);
-    exportProgress.classList.add('hidden');
-    exportResult.classList.remove('hidden');
-    triggerDownload();
-  }
-
-  function triggerDownload() {
-    if (!resultUrl) return;
+  function downloadResult(r) {
     var a = document.createElement('a');
-    a.href = resultUrl;
-    a.download = downloadName(resultFmt);
+    a.href = r.url;
+    a.download = r.name;
     document.body.appendChild(a);
     a.click();
     a.remove();
   }
 
+  function freeResults(list) {
+    (list || []).forEach(function (r) { URL.revokeObjectURL(r.url); });
+  }
+
+  var lastResults = [];
+
+  function finishExport(results, fmt) {
+    exporting = false;
+    btnExport.disabled = false;
+    freeResults(lastResults);
+    lastResults = results;
+
+    // preview the last finished clip
+    var last = results[results.length - 1];
+    var preview = $('resultPreview');
+    preview.innerHTML = '';
+    if (fmt === 'mp4') {
+      var v = document.createElement('video');
+      v.src = last.url;
+      v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
+      preview.appendChild(v);
+    } else {
+      var img = document.createElement('img');
+      img.src = last.url;
+      img.alt = 'Exported clip';
+      preview.appendChild(img);
+    }
+
+    var totalBytes = results.reduce(function (s, r) { return s + r.size; }, 0);
+    $('resultName').textContent = results.length > 1
+      ? results.length + ' clips exported'
+      : last.name;
+    $('resultSize').textContent = fmtSize(totalBytes);
+    exportProgress.classList.add('hidden');
+    exportResult.classList.remove('hidden');
+  }
+
+  function triggerDownload() {
+    lastResults.forEach(downloadResult);
+  }
+
   function closeExport() {
     exportCard.classList.add('hidden');
-    if (resultUrl) { URL.revokeObjectURL(resultUrl); resultUrl = null; }
+    freeResults(lastResults);
+    lastResults = [];
     $('resultPreview').innerHTML = '';
   }
 

@@ -334,6 +334,51 @@ body {
   flex-wrap: wrap;
 }
 
+/* ---------- saved clips ---------- */
+.clips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.clip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 6px 6px 6px 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.clip-chip b { color: var(--text); }
+.clip-chip:hover { border-color: var(--accent); }
+
+.chip-x {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+.chip-x:hover { color: var(--out-color); }
+
+.tl-saved {
+  position: absolute;
+  bottom: -3px;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 #fmtSelect {
   background: var(--panel-2);
   color: var(--text);

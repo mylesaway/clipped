@@ -61,6 +61,7 @@
 
           <div class="controls">
             <button class="btn-icon" id="btnPlay" aria-label="Play or pause">▶</button>
+            <button class="btn-icon" id="btnAddClip" aria-label="Save this clip and pick another" title="Save this clip, then pick another section">＋</button>
             <button class="btn-chip in" id="btnSetIn">⇤ Start here</button>
             <button class="btn-chip out" id="btnSetOut">End here ⇥</button>
             <label class="loop-toggle">
@@ -68,6 +69,8 @@
               Loop clip
             </label>
           </div>
+
+          <div class="clips-row hidden" id="clipsRow"></div>
         </div>
 
         <div class="clip-summary">
