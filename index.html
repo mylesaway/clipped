@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#0f1115" />
     <title>Clipped — HD clips that look good in a deck</title>
     <meta name="description" content="Turn any video into short, shareable HD clips and GIFs. No watermarks." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✂️</text></svg>" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -74,8 +75,34 @@
             Your clip: <b id="sumIn">0:00.0</b> → <b id="sumOut">0:00.0</b> &nbsp;·&nbsp; <b id="sumLen">0:00.0</b> long
           </div>
           <div class="summary-actions">
-            <span class="coming-soon">Export to MP4 / WebP / GIF — coming next</span>
-            <button class="btn-primary" disabled>Export clip</button>
+            <select id="fmtSelect" aria-label="Export format">
+              <option value="mp4" selected>MP4 — HD video, best for decks</option>
+              <option value="webp">WebP — animated, small file</option>
+              <option value="gif">GIF — pastes anywhere</option>
+            </select>
+            <button class="btn-primary" id="btnExport">Export clip</button>
+          </div>
+        </div>
+
+        <!-- export progress + result -->
+        <div class="export-card hidden" id="exportCard">
+          <div class="export-progress" id="exportProgress">
+            <div class="export-status-row">
+              <span id="exportStatus">Preparing…</span>
+              <button class="btn-ghost" id="btnCancelExport">Cancel</button>
+            </div>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          </div>
+          <div class="export-result hidden" id="exportResult">
+            <div class="result-preview" id="resultPreview"></div>
+            <div class="result-info">
+              <div><b id="resultName"></b> · <span id="resultSize"></span></div>
+              <div class="result-hint">Saved to your downloads — drop it straight into your deck, Slack, or email.</div>
+              <div class="result-actions">
+                <button class="btn-primary" id="btnDownloadAgain">Download again</button>
+                <button class="btn-ghost" id="btnCloseExport">Done</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -85,6 +112,7 @@
       </footer>
     </div>
 
+    <script src="vendor/ffmpeg/ffmpeg.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

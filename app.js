@@ -30,6 +30,7 @@
 
   // ---- state ----
   var url = null;
+  var file = null;
   var duration = 0;
   var inPoint = 0;
   var outPoint = 0;
@@ -63,6 +64,7 @@
     }
     if (url) URL.revokeObjectURL(url);
     url = URL.createObjectURL(f);
+    file = f;
     video.src = url;
 
     $('metaName').textContent = f.name;
@@ -313,6 +315,8 @@
     video.removeAttribute('src');
     video.load();
     if (url) { URL.revokeObjectURL(url); url = null; }
+    file = null;
+    closeExport();
     duration = 0;
     stripToken++;
     strip.innerHTML = '';
@@ -323,4 +327,200 @@
   }
 
   btnNew.addEventListener('click', resetToUpload);
+
+  // ---- export (ffmpeg.wasm, runs entirely in the browser) ----
+  var fmtSelect = $('fmtSelect');
+  var btnExport = $('btnExport');
+  var exportCard = $('exportCard');
+  var exportProgress = $('exportProgress');
+  var exportResult = $('exportResult');
+  var exportStatus = $('exportStatus');
+  var progressFill = $('progressFill');
+
+  var ffmpeg = null;        // FFmpeg instance, kept warm between exports
+  var exporting = false;
+  var cancelled = false;
+  var resultUrl = null;
+  var resultFmt = null; // format of the finished export, so re-downloads name it right
+
+  // progress reported by parsing ffmpeg's own log lines, scaled to the
+  // window [from..to] so multi-pass exports (GIF) show one smooth bar
+  var progWindow = { from: 0, to: 1, clipLen: 1 };
+
+  function setProgress(ratio) {
+    var p = Math.max(0, Math.min(1, ratio));
+    progressFill.style.width = (p * 100).toFixed(1) + '%';
+  }
+
+  function onFfmpegLog(e) {
+    var m = /time=\s*(\d+):(\d+):(\d+\.?\d*)/.exec(e.message || '');
+    if (!m) return;
+    var t = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]);
+    var local = Math.min(1, t / progWindow.clipLen);
+    setProgress(progWindow.from + local * (progWindow.to - progWindow.from));
+  }
+
+  function getFFmpeg() {
+    if (ffmpeg) return Promise.resolve(ffmpeg);
+    if (!window.FFmpegWASM) {
+      return Promise.reject(new Error('engine script missing'));
+    }
+    var inst = new window.FFmpegWASM.FFmpeg();
+    inst.on('log', onFfmpegLog);
+    exportStatus.textContent = 'Loading the video engine (first time only, ~30 MB)…';
+    return inst.load({
+      coreURL: new URL('vendor/ffmpeg/ffmpeg-core.js', location.href).toString(),
+      wasmURL: new URL('vendor/ffmpeg/ffmpeg-core.wasm', location.href).toString()
+    }).then(function () {
+      ffmpeg = inst;
+      return inst;
+    });
+  }
+
+  function trimArgs(inputName) {
+    return ['-ss', inPoint.toFixed(3), '-to', outPoint.toFixed(3), '-i', inputName];
+  }
+
+  function runExport(fmt, inputName) {
+    var outName = 'out.' + fmt;
+    if (fmt === 'mp4') {
+      exportStatus.textContent = 'Exporting HD MP4…';
+      progWindow = { from: 0, to: 1, clipLen: outPoint - inPoint };
+      return ffmpeg.exec(trimArgs(inputName).concat([
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', '-y', outName
+      ])).then(function () { return outName; });
+    }
+    if (fmt === 'webp') {
+      exportStatus.textContent = 'Exporting animated WebP…';
+      progWindow = { from: 0, to: 1, clipLen: outPoint - inPoint };
+      return ffmpeg.exec(trimArgs(inputName).concat([
+        '-vcodec', 'libwebp', '-filter:v', 'fps=20',
+        '-lossless', '0', '-q:v', '75', '-loop', '0', '-an', '-y', outName
+      ])).then(function () { return outName; });
+    }
+    // gif: two passes — build a color palette first, then use it (much better quality)
+    var vf = 'fps=15,scale=min(1080\\,iw):-1:flags=lanczos';
+    exportStatus.textContent = 'Preparing GIF colors…';
+    progWindow = { from: 0, to: 0.35, clipLen: outPoint - inPoint };
+    return ffmpeg.exec(trimArgs(inputName).concat([
+      '-vf', vf + ',palettegen=stats_mode=diff', '-y', 'palette.png'
+    ])).then(function () {
+      if (cancelled) throw new Error('cancelled');
+      exportStatus.textContent = 'Exporting GIF…';
+      progWindow = { from: 0.35, to: 1, clipLen: outPoint - inPoint };
+      return ffmpeg.exec(trimArgs(inputName).concat([
+        '-i', 'palette.png',
+        '-lavfi', vf + ',paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
+        '-y', outName
+      ]));
+    }).then(function () { return outName; });
+  }
+
+  function exportClip() {
+    if (exporting || !file || !duration) return;
+    exporting = true;
+    cancelled = false;
+    var fmt = fmtSelect.value;
+    btnExport.disabled = true;
+    exportCard.classList.remove('hidden');
+    exportProgress.classList.remove('hidden');
+    exportResult.classList.add('hidden');
+    setProgress(0);
+    exportCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    var ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
+    if (ACCEPTED.indexOf(ext) === -1) ext = 'mp4';
+    var inputName = 'input.' + ext;
+
+    getFFmpeg().then(function () {
+      if (cancelled) throw new Error('cancelled');
+      exportStatus.textContent = 'Reading your video…';
+      return file.arrayBuffer();
+    }).then(function (buf) {
+      if (cancelled) throw new Error('cancelled');
+      return ffmpeg.writeFile(inputName, new Uint8Array(buf));
+    }).then(function () {
+      if (cancelled) throw new Error('cancelled');
+      return runExport(fmt, inputName);
+    }).then(function (outName) {
+      if (cancelled) throw new Error('cancelled');
+      return ffmpeg.readFile(outName);
+    }).then(function (data) {
+      if (cancelled) throw new Error('cancelled');
+      setProgress(1);
+      var mime = fmt === 'mp4' ? 'video/mp4' : fmt === 'webp' ? 'image/webp' : 'image/gif';
+      finishExport(new Blob([data.buffer], { type: mime }), fmt);
+    }).catch(function (err) {
+      exporting = false;
+      btnExport.disabled = false;
+      if (cancelled) { exportCard.classList.add('hidden'); return; }
+      exportCard.classList.add('hidden');
+      showNotice('Export didn’t work for this video. Try MP4 format, or a shorter clip.');
+      if (window.console) console.error('export failed:', err);
+    });
+  }
+
+  function downloadName(fmt) {
+    var base = (file && file.name ? file.name : 'clip').replace(/\.[^.]+$/, '');
+    return base + '-clip.' + fmt;
+  }
+
+  function finishExport(blob, fmt) {
+    exporting = false;
+    btnExport.disabled = false;
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    resultUrl = URL.createObjectURL(blob);
+    resultFmt = fmt;
+
+    var preview = $('resultPreview');
+    preview.innerHTML = '';
+    if (fmt === 'mp4') {
+      var v = document.createElement('video');
+      v.src = resultUrl;
+      v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
+      preview.appendChild(v);
+    } else {
+      var img = document.createElement('img');
+      img.src = resultUrl;
+      img.alt = 'Exported clip';
+      preview.appendChild(img);
+    }
+
+    $('resultName').textContent = downloadName(fmt);
+    $('resultSize').textContent = fmtSize(blob.size);
+    exportProgress.classList.add('hidden');
+    exportResult.classList.remove('hidden');
+    triggerDownload();
+  }
+
+  function triggerDownload() {
+    if (!resultUrl) return;
+    var a = document.createElement('a');
+    a.href = resultUrl;
+    a.download = downloadName(resultFmt);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function closeExport() {
+    exportCard.classList.add('hidden');
+    if (resultUrl) { URL.revokeObjectURL(resultUrl); resultUrl = null; }
+    $('resultPreview').innerHTML = '';
+  }
+
+  btnExport.addEventListener('click', exportClip);
+  $('btnDownloadAgain').addEventListener('click', triggerDownload);
+  $('btnCloseExport').addEventListener('click', closeExport);
+  $('btnCancelExport').addEventListener('click', function () {
+    if (!exporting) { exportCard.classList.add('hidden'); return; }
+    cancelled = true;
+    // terminate kills the worker mid-job; a fresh engine is loaded on next export
+    if (ffmpeg) { try { ffmpeg.terminate(); } catch (e) {} ffmpeg = null; }
+    exporting = false;
+    btnExport.disabled = false;
+    exportCard.classList.add('hidden');
+  });
 })();

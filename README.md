@@ -10,12 +10,13 @@ A web tool that turns your own video into short, shareable clips. Everything run
 - Scrub through it on a filmstrip timeline
 - Trim: drag the handles (or press `I` / `O`) to set start and end
 - Preview the trimmed clip on a loop
+- Export your clip as an HD MP4, animated WebP, or high-quality GIF — made right in your browser and saved to your downloads
 - Works on phones too
 
 ## Coming next (build order)
 
 1. ~~Upload + timeline + trim~~ ✅
-2. Export the clip — HD MP4 first, then WebP, then high-quality GIF
+2. ~~Export the clip — HD MP4, WebP, and high-quality GIF~~ ✅
 3. Drag-to-use + Download + resolution/frame-rate picker
 4. Multi-segment: pick several parts of one video and stitch them together
 5. Accounts + export history (Supabase)
