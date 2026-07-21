@@ -12,8 +12,8 @@
         <g transform="rotate(-26 38 66)">
           <rect x="34" y="57" width="72" height="18" rx="7"/>
         </g>
-        <circle cx="17" cy="48" r="8" fill="none" stroke="white" stroke-width="6.5"/>
-        <circle cx="17" cy="84" r="8" fill="none" stroke="white" stroke-width="6.5"/>
+        <circle cx="24" cy="53" r="8" fill="none" stroke="white" stroke-width="6.5"/>
+        <circle cx="24" cy="80" r="8" fill="none" stroke="white" stroke-width="6.5"/>
       </g>
       <g fill="black">
         <g transform="rotate(-26 38 66)">
