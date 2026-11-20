@@ -375,7 +375,8 @@ body {
   pointer-events: none;
 }
 
-#fmtSelect {
+#fmtSelect,
+#sizeSelect {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
@@ -384,7 +385,8 @@ body {
   font-size: 14px;
   cursor: pointer;
 }
-#fmtSelect:focus { outline: none; border-color: var(--accent); }
+#fmtSelect:focus,
+#sizeSelect:focus { outline: none; border-color: var(--accent); }
 
 /* ---------- export card ---------- */
 .export-card {

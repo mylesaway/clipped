@@ -83,6 +83,12 @@
               <option value="webp">WebP — animated, small file</option>
               <option value="gif">GIF — pastes anywhere</option>
             </select>
+            <select id="sizeSelect" aria-label="File size limit">
+              <option value="0" selected>Best quality — no size limit</option>
+              <option value="25">Fit under 25 MB — Gmail</option>
+              <option value="10">Fit under 10 MB — most work email</option>
+              <option value="5">Fit under 5 MB — strict email</option>
+            </select>
             <button class="btn-primary" id="btnExport">Export clip</button>
           </div>
         </div>
@@ -100,7 +106,7 @@
             <div class="result-preview" id="resultPreview"></div>
             <div class="result-info">
               <div><b id="resultName"></b> · <span id="resultSize"></span></div>
-              <div class="result-hint">Saved to your downloads — drop it straight into your deck, Slack, or email.</div>
+              <div class="result-hint" id="resultHint">Saved to your downloads — drop it straight into your deck, Slack, or email.</div>
               <div class="result-actions">
                 <button class="btn-primary" id="btnDownloadAgain">Download again</button>
                 <button class="btn-ghost" id="btnCloseExport">Done</button>

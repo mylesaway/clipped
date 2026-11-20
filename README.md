@@ -12,6 +12,7 @@ A web tool that turns your own video into short, shareable clips. Everything run
 - Preview the trimmed clip on a loop
 - Export your clip as an HD MP4, animated WebP, or high-quality GIF — made right in your browser and saved to your downloads
 - Save several clips from one video with the ＋ button — each one exports as its own file
+- Pick a size limit (5 / 10 / 25 MB) and Clipped automatically shrinks the clip until it fits — handy for email attachments
 - Works on phones too
 
 ## Coming next (build order)
@@ -20,7 +21,7 @@ A web tool that turns your own video into short, shareable clips. Everything run
 2. ~~Export the clip — HD MP4, WebP, and high-quality GIF~~ ✅
 3. ~~Multiple clips: press ＋ to save a section, then pick more — each exports as its own file~~ ✅
 4. Stitch several saved clips into one clip
-5. Resolution / frame-rate picker
+5. Manual resolution / frame-rate picker
 6. Accounts + export history (Supabase)
 7. Server-side processing for big files
 8. Polish: PWA, presets ("Slack", "Email", "Slide — HD")

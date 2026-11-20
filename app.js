@@ -388,6 +388,7 @@
 
   // ---- export (ffmpeg.wasm, runs entirely in the browser) ----
   var fmtSelect = $('fmtSelect');
+  var sizeSelect = $('sizeSelect');
   var btnExport = $('btnExport');
   var exportCard = $('exportCard');
   var exportProgress = $('exportProgress');
@@ -437,15 +438,62 @@
     return ['-ss', seg.in.toFixed(3), '-to', seg.out.toFixed(3), '-i', inputName];
   }
 
-  function runExport(fmt, seg, inputName, label) {
+  // ---- size targeting ----
+  // Export, measure, and if the file is over the limit, shrink and go again.
+  var MAX_TRIES = 6;
+  var FPS_STEPS = [20, 15, 12, 10, 8, 6];
+
+  function sourceWidth() { return video.videoWidth || 1280; }
+
+  // where to start: full quality with no limit, more modest when a limit is set
+  function startParams(fmt, budget) {
+    var src = sourceWidth();
+    if (fmt === 'mp4') {
+      return { width: budget ? Math.min(1280, src) : src, crf: 20, bitrate: 0 };
+    }
+    if (fmt === 'webp') {
+      return { width: Math.min(budget ? 900 : 1280, src), fps: 20, quality: 75 };
+    }
+    return { width: Math.min(budget ? 640 : 1080, src), fps: budget ? 12 : 15 };
+  }
+
+  // size scales roughly with pixel count, so shrink width by the square root
+  // of how far over we are; drop frame rate once the picture gets small
+  function shrinkParams(fmt, p, actual, budget) {
+    var next = {};
+    for (var k in p) next[k] = p[k];
+    var factor = Math.sqrt(budget / actual) * 0.92;
+    factor = Math.max(0.45, Math.min(0.92, factor));
+
+    if (fmt === 'mp4') {
+      next.width = Math.max(480, Math.round(p.width * factor / 2) * 2);
+      next.crf = Math.min(34, p.crf + 4);
+      return next;
+    }
+    next.width = Math.max(240, Math.round(p.width * factor));
+    if (factor < 0.75 || next.width <= 360) {
+      var i = FPS_STEPS.indexOf(p.fps);
+      if (i === -1) i = 1;
+      next.fps = FPS_STEPS[Math.min(FPS_STEPS.length - 1, i + 1)];
+    }
+    if (fmt === 'webp') next.quality = Math.max(40, p.quality - 12);
+    return next;
+  }
+
+  function scaleFilter(width, even) {
+    // min() keeps us from upscaling a small source; the comma needs escaping
+    return 'scale=min(' + width + '\\,iw):' + (even ? '-2' : '-1') + ':flags=lanczos';
+  }
+
+  function runExport(fmt, seg, inputName, label, p) {
     var outName = 'out.' + fmt;
     var len = seg.out - seg.in;
     if (fmt === 'mp4') {
       exportStatus.textContent = label + 'Exporting HD MP4…';
       progWindow = { from: 0, to: 1, clipLen: len };
       return ffmpeg.exec(trimArgs(seg, inputName).concat([
-        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-vf', scaleFilter(p.width, true),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(p.crf),
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', '-y', outName
       ])).then(function () { return outName; });
     }
@@ -453,12 +501,12 @@
       exportStatus.textContent = label + 'Exporting animated WebP…';
       progWindow = { from: 0, to: 1, clipLen: len };
       return ffmpeg.exec(trimArgs(seg, inputName).concat([
-        '-vcodec', 'libwebp', '-filter:v', 'fps=20',
-        '-lossless', '0', '-q:v', '75', '-loop', '0', '-an', '-y', outName
+        '-vcodec', 'libwebp', '-filter:v', 'fps=' + p.fps + ',' + scaleFilter(p.width, true),
+        '-lossless', '0', '-q:v', String(p.quality), '-loop', '0', '-an', '-y', outName
       ])).then(function () { return outName; });
     }
     // gif: two passes — build a color palette first, then use it (much better quality)
-    var vf = 'fps=15,scale=min(1080\\,iw):-1:flags=lanczos';
+    var vf = 'fps=' + p.fps + ',' + scaleFilter(p.width, false);
     exportStatus.textContent = label + 'Preparing GIF colors…';
     progWindow = { from: 0, to: 0.35, clipLen: len };
     return ffmpeg.exec(trimArgs(seg, inputName).concat([
@@ -473,6 +521,33 @@
         '-y', outName
       ]));
     }).then(function () { return outName; });
+  }
+
+  // one clip, retried at smaller settings until it fits the budget
+  function exportWithinBudget(fmt, seg, inputName, label, budget) {
+    var p = startParams(fmt, budget);
+    var tries = 0;
+    var mime = fmt === 'mp4' ? 'video/mp4' : fmt === 'webp' ? 'image/webp' : 'image/gif';
+
+    function attempt() {
+      tries++;
+      var note = tries > 1 ? ' (smaller — try ' + tries + ' of ' + MAX_TRIES + ')' : '';
+      return runExport(fmt, seg, inputName, label + note.replace(/^ /, ''), p)
+        .then(function (outName) { return ffmpeg.readFile(outName); })
+        .then(function (data) {
+          if (cancelled) throw new Error('cancelled');
+          var blob = new Blob([data.buffer], { type: mime });
+          if (!budget || blob.size <= budget || tries >= MAX_TRIES) {
+            return { blob: blob, params: p, overBudget: !!budget && blob.size > budget };
+          }
+          exportStatus.textContent = label + 'That came out ' + fmtSize(blob.size) +
+            ' — trying a smaller size…';
+          setProgress(0);
+          p = shrinkParams(fmt, p, blob.size, budget);
+          return attempt();
+        });
+    }
+    return attempt();
   }
 
   function exportClip() {
@@ -494,6 +569,9 @@
     // saved clips export one after another; otherwise just the current selection
     var segs = clips.length ? clips.slice() : [{ in: inPoint, out: outPoint }];
     var results = [];
+    var budgetMb = +sizeSelect.value || 0;
+    // leave a little headroom so we land comfortably under the stated limit
+    var budget = budgetMb ? Math.round(budgetMb * 1024 * 1024 * 0.95) : 0;
 
     getFFmpeg().then(function () {
       if (cancelled) throw new Error('cancelled');
@@ -508,15 +586,14 @@
         chain = chain.then(function () {
           if (cancelled) throw new Error('cancelled');
           var label = segs.length > 1 ? 'Clip ' + (i + 1) + ' of ' + segs.length + ' — ' : '';
-          return runExport(fmt, seg, inputName, label).then(function (outName) {
-            return ffmpeg.readFile(outName);
-          }).then(function (data) {
+          return exportWithinBudget(fmt, seg, inputName, label, budget).then(function (out) {
             if (cancelled) throw new Error('cancelled');
-            var mime = fmt === 'mp4' ? 'video/mp4' : fmt === 'webp' ? 'image/webp' : 'image/gif';
-            var blob = new Blob([data.buffer], { type: mime });
             results.push({
-              url: URL.createObjectURL(blob),
-              size: blob.size,
+              url: URL.createObjectURL(out.blob),
+              size: out.blob.size,
+              width: out.params.width,
+              fps: out.params.fps || 0,
+              overBudget: out.overBudget,
               name: downloadName(fmt, segs.length > 1 ? i + 1 : 0)
             });
             downloadResult(results[results.length - 1]);
@@ -526,7 +603,7 @@
       return chain;
     }).then(function () {
       setProgress(1);
-      finishExport(results, fmt);
+      finishExport(results, fmt, budgetMb);
     }).catch(function (err) {
       exporting = false;
       btnExport.disabled = false;
@@ -559,7 +636,7 @@
 
   var lastResults = [];
 
-  function finishExport(results, fmt) {
+  function finishExport(results, fmt, budgetMb) {
     exporting = false;
     btnExport.disabled = false;
     freeResults(lastResults);
@@ -585,7 +662,23 @@
     $('resultName').textContent = results.length > 1
       ? results.length + ' clips exported'
       : last.name;
-    $('resultSize').textContent = fmtSize(totalBytes);
+
+    // when several clips, show the biggest one — that's what has to fit the limit
+    var biggest = results.reduce(function (a, b) { return b.size > a.size ? b : a; });
+    var detail = results.length > 1
+      ? fmtSize(totalBytes) + ' total · biggest ' + fmtSize(biggest.size)
+      : fmtSize(last.size);
+    detail += ' · ' + last.width + 'px wide' + (last.fps ? ' · ' + last.fps + ' fps' : '');
+    $('resultSize').textContent = detail;
+
+    var missed = results.filter(function (r) { return r.overBudget; }).length;
+    $('resultHint').textContent = missed
+      ? 'Couldn’t get ' + (missed > 1 ? missed + ' clips' : 'this') + ' under ' +
+        budgetMb + ' MB — try a shorter clip, or MP4 instead of GIF.'
+      : budgetMb
+        ? 'Fits your email limit. Saved to your downloads.'
+        : 'Saved to your downloads — drop it straight into your deck, Slack, or email.';
+
     exportProgress.classList.add('hidden');
     exportResult.classList.remove('hidden');
   }
